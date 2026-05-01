@@ -1,0 +1,6 @@
+# Control API — FastAPI + DB clients
+fastapi
+uvicorn[standard]
+pydantic
+psycopg2-binary
+clickhouse-connect

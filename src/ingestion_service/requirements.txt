@@ -1,0 +1,5 @@
+# Ingestion Service — Kafka consumer + ClickHouse/Postgres writer
+confluent-kafka
+clickhouse-connect
+psycopg2-binary
+python-dotenv

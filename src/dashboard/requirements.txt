@@ -1,0 +1,6 @@
+# Dashboard — Streamlit UI + data visualisation
+streamlit
+plotly
+pandas
+requests
+clickhouse-connect

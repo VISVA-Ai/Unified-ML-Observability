@@ -1,0 +1,6 @@
+# Drift Worker — Celery Beat + PSI calculation
+celery[redis]
+redis
+numpy
+clickhouse-connect
+psycopg2-binary

@@ -1,0 +1,7 @@
+# Prediction API + Label Simulator
+fastapi
+uvicorn[standard]
+pydantic
+confluent-kafka
+redis
+python-dotenv

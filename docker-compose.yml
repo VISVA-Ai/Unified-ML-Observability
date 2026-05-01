@@ -1,0 +1,173 @@
+services:
+  # ----------------------------------------
+  # Message Broker: Redpanda (Kafka-compatible)
+  # ----------------------------------------
+  redpanda:
+    image: redpandadata/redpanda:latest
+    command:
+      - redpanda
+      - start
+      - --smp
+      - '1'
+      - --reserve-memory
+      - 0M
+      - --overprovisioned
+      - --node-id
+      - '0'
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9644/v1/status/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  create-topics:
+    image: redpandadata/redpanda:latest
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    command:
+      - bash
+      - -c
+      - |
+        rpk topic create ml-telemetry --brokers redpanda:29092 || true
+        rpk topic create ml-labels    --brokers redpanda:29092 || true
+
+  # ----------------------------------------
+  # Cache & Task Queue Broker: Redis
+  # ----------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------
+  # Metrics DB: ClickHouse (OLAP / Time-Series)
+  # ----------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ----------------------------------------
+  # Metadata DB: PostgreSQL (Control Plane)
+  # ----------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: observability_metadata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d observability_metadata"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ========================================
+  # PLATFORM MICROSERVICES
+  # ========================================
+
+  prediction_api:
+    build:
+      context: .
+      dockerfile: src/prediction_api/Dockerfile
+    ports:
+      - "8000:8000"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  label_simulator:
+    build:
+      context: .
+      dockerfile: src/prediction_api/Dockerfile
+    command: ["python", "src/prediction_api/label_simulator.py"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  ingestion_service:
+    build:
+      context: .
+      dockerfile: src/ingestion_service/Dockerfile
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  control_api:
+    build:
+      context: .
+      dockerfile: src/control_api/Dockerfile
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  drift_worker:
+    build:
+      context: .
+      dockerfile: src/drift_worker/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: src/dashboard/Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      - CONTROL_API_URL=http://control_api:8001
+    depends_on:
+      control_api:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
+
+volumes:
+  clickhouse_data:
+  postgres_data:
